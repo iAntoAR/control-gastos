@@ -288,9 +288,12 @@ nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-w
 
   <!-- CATEGORÍAS -->
   <div class="screen" id="screen-cats">
-    <div class="header">
-      <h1>Categorías</h1>
-      <p>Toca para editar límite de gasto</p>
+    <div class="header" style="display:flex;align-items:flex-start;justify-content:space-between">
+      <div>
+        <h1>Categorías</h1>
+        <p>Personalizadas y predeterminadas</p>
+      </div>
+      <button onclick="openCatModal(null)" style="margin-top:48px;background:var(--green);border:none;color:#000;font-size:13px;font-weight:700;padding:8px 14px;border-radius:20px;cursor:pointer">+ Nueva</button>
     </div>
     <div class="section-title">Ingresos</div>
     <div class="cat-list" id="cat-income-list"></div>
@@ -403,6 +406,29 @@ nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-w
   <button class="save-btn" onclick="saveMovimiento()">Guardar</button>
   <button class="delete-btn" id="delete-btn" style="display:none" onclick="confirmDelete()">Eliminar movimiento</button>
   <button class="cancel-btn" onclick="closeModal()">Cancelar</button>
+</div>
+</div>
+
+<!-- CAT MODAL -->
+<div class="modal-overlay" id="cat-modal-overlay" onclick="closeCatModalIfOutside(event)">
+<div class="modal" id="cat-modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title" id="cat-modal-title">Nueva categoría</div>
+  <div class="type-toggle">
+    <button class="type-btn active income" id="cat-type-income" onclick="setCatType('income')">↑ Ingreso</button>
+    <button class="type-btn expense" id="cat-type-expense" onclick="setCatType('expense')">↓ Egreso</button>
+  </div>
+  <div class="field">
+    <label>Nombre</label>
+    <input type="text" id="cat-name-input" placeholder="Ej. Mascota, Gimnasio...">
+  </div>
+  <div class="field">
+    <label>Emoji</label>
+    <input type="text" id="cat-emoji-input" placeholder="🐾" maxlength="2" style="font-size:24px;text-align:center">
+  </div>
+  <button class="save-btn" onclick="saveCatModal()">Guardar</button>
+  <button class="delete-btn" id="cat-delete-btn" style="display:none" onclick="confirmDeleteCat()">Eliminar categoría</button>
+  <button class="cancel-btn" onclick="closeCatModal()">Cancelar</button>
 </div>
 </div>
 
@@ -1090,7 +1116,6 @@ function renderLine(movs){
 function renderCats(){
   const incList=document.getElementById('cat-income-list');
   const expList=document.getElementById('cat-expense-list');
-  const[rs,re]=getPeriodRange('month',null,null);
   const monthMovs=getMovimientosForPeriod('month',null,null);
 
   function catSpentThisMonth(catId){
@@ -1110,16 +1135,20 @@ function renderCats(){
         <div class="limit-bar-wrap"><div class="limit-bar-fill" style="width:${pct}%;background:${limitColor}"></div></div>
         <div class="limit-pct" style="color:${limitColor}">${fmtMXN(spent)}/${fmtMXN(limit)}</div>
       </div>`:'';
+      const builtinBadge=c.builtin?`<span style="font-size:10px;color:var(--text3);margin-left:4px">predeterminada</span>`:'';
       return`<div class="cat-item">
         <div class="cat-emoji">${c.emoji}</div>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <div class="cat-name">${c.name}</div>
-            <div class="cat-type ${type}">${type==='income'?'Ingreso':'Egreso'}</div>
+            ${builtinBadge}
           </div>
           ${limitBar}
         </div>
-        ${type==='expense'?`<button class="icon-btn" onclick="openLimitModal('${c.id}')" title="Límite de gasto">🎯</button>`:''}
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          ${type==='expense'?`<button class="icon-btn" onclick="openLimitModal('${c.id}')" title="Límite de gasto">🎯</button>`:''}
+          <button class="icon-btn" onclick="openCatModal('${c.id}')" title="Editar">✏️</button>
+        </div>
       </div>`;
     }).join('');
     if(cats.length===0) el.innerHTML=`<div class="empty"><p>Sin categorías</p></div>`;
@@ -1148,6 +1177,82 @@ async function saveLimitModal(){
     showToast('Límite guardado');
   }
   closeLimitModalDirect();
+}
+
+// CAT MODAL
+let editingCatId=null;
+let currentCatType='income';
+
+function setCatType(t){
+  currentCatType=t;
+  document.getElementById('cat-type-income').classList.toggle('active',t==='income');
+  document.getElementById('cat-type-expense').classList.toggle('active',t==='expense');
+}
+
+function openCatModal(catId){
+  editingCatId=catId;
+  const deleteBtn=document.getElementById('cat-delete-btn');
+  if(catId){
+    const cat=getCatById(catId);
+    document.getElementById('cat-modal-title').textContent='Editar categoría';
+    document.getElementById('cat-name-input').value=cat.name;
+    document.getElementById('cat-emoji-input').value=cat.emoji||'';
+    setCatType(cat.type);
+    document.getElementById('cat-type-income').disabled=true;
+    document.getElementById('cat-type-expense').disabled=true;
+    // Solo categorías personalizadas se pueden eliminar
+    deleteBtn.style.display=cat.builtin?'none':'block';
+  } else {
+    document.getElementById('cat-modal-title').textContent='Nueva categoría';
+    document.getElementById('cat-name-input').value='';
+    document.getElementById('cat-emoji-input').value='';
+    setCatType('income');
+    document.getElementById('cat-type-income').disabled=false;
+    document.getElementById('cat-type-expense').disabled=false;
+    deleteBtn.style.display='none';
+  }
+  document.getElementById('cat-modal-overlay').classList.add('open');
+}
+
+function closeCatModal(){document.getElementById('cat-modal-overlay').classList.remove('open');}
+function closeCatModalIfOutside(e){if(e.target===document.getElementById('cat-modal-overlay'))closeCatModal();}
+
+async function saveCatModal(){
+  const name=document.getElementById('cat-name-input').value.trim();
+  const emoji=document.getElementById('cat-emoji-input').value.trim()||'📋';
+  if(!name){showToast('Escribe un nombre para la categoría');return;}
+  if(editingCatId){
+    const idx=db.categorias.findIndex(c=>c.id===editingCatId);
+    if(idx>=0){
+      db.categorias[idx].name=name;
+      db.categorias[idx].emoji=emoji;
+      await sbUpsertCat(db.categorias[idx]);
+      showToast('Categoría actualizada');
+    }
+  } else {
+    const newCat={id:uid(),name,type:currentCatType,emoji,builtin:false,hidden:false,limit:0};
+    db.categorias.push(newCat);
+    await sbUpsertCat(newCat);
+    showToast('Categoría creada');
+  }
+  closeCatModal();
+  renderCats();
+}
+
+function confirmDeleteCat(){
+  const cat=getCatById(editingCatId);
+  const inUse=db.movimientos.some(m=>m.categoryId===editingCatId);
+  if(inUse){
+    showToast('No se puede eliminar: tiene movimientos asociados');
+    return;
+  }
+  showConfirm('¿Eliminar categoría?',`Se eliminará "${cat.name}". Esta acción no se puede deshacer.`,async()=>{
+    db.categorias=db.categorias.filter(c=>c.id!==editingCatId);
+    await sbFetch('categorias?id=eq.'+editingCatId,{method:'DELETE',prefer:'return=minimal'});
+    closeCatModal();
+    renderCats();
+    showToast('Categoría eliminada');
+  });
 }
 
 // SAVE VIEW
