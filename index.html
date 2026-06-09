@@ -538,22 +538,6 @@ async function getValidToken(){
 }
 
 // ── AUTH UI ──────────────────────────────────────────────────────
-let authMode='login';
-
-function toggleAuthMode(){
-  authMode=authMode==='login'?'register':'login';
-  document.getElementById('login-sub').textContent=authMode==='login'?'Inicia sesión para continuar':'Crea tu cuenta';
-  document.getElementById('login-btn').textContent=authMode==='login'?'Entrar':'Crear cuenta';
-  document.getElementById('login-toggle').innerHTML=authMode==='login'?'¿No tienes cuenta? <span>Regístrate</span>':'¿Ya tienes cuenta? <span>Inicia sesión</span>';
-  document.getElementById('login-err').classList.remove('show');
-}
-
-function togglePassword(){
-  const input=document.getElementById('login-password');
-  const btn=document.getElementById('eye-btn');
-  if(input.type==='password'){input.type='text';btn.textContent='🙈';}
-  else{input.type='password';btn.textContent='👁';}
-}
 
 async function doLogin(){
   const email=document.getElementById('login-email').value.trim();
@@ -609,14 +593,28 @@ async function doLogout(){
     fetch(SB_URL+'/auth/v1/logout',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token}}).catch(()=>{});
   }
   clearSession();
+  // Reset all app state
   db={movimientos:[],categorias:[],vistas:[]};
+  currentPeriod='month';
+  customFrom=null;
+  customTo=null;
+  activeSavedView=null;
+  editingId=null;
+  editingCatId=null;
+  limitCatId=null;
+  // Reset period buttons UI
+  document.querySelectorAll('.period-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelector('.period-btn[data-period="month"]').classList.add('active');
+  document.getElementById('custom-date-wrap').style.display='none';
+  document.getElementById('saved-period-btn').style.display='none';
+  // Reset login form
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('app').style.display='none';
   document.getElementById('login-email').value='';
   document.getElementById('login-password').value='';
   document.getElementById('login-btn').textContent='Entrar';
   document.getElementById('login-btn').disabled=false;
-  authMode='login';
+  document.getElementById('login-err').classList.remove('show');
 }
 
 function enterApp(){
@@ -655,24 +653,6 @@ let activeSavedView=null;
 let limitCatId=null;
 let confirmCallback=null;
 let pieChart=null,lineChart=null;
-
-const DEFAULT_CATS=[
-  {id:'sal',name:'Salario',type:'income',emoji:'💼',builtin:true,limit:0},
-  {id:'free',name:'Freelance',type:'income',emoji:'💻',builtin:true,limit:0},
-  {id:'ven',name:'Venta',type:'income',emoji:'🛍️',builtin:true,limit:0},
-  {id:'ren',name:'Rendimientos',type:'income',emoji:'📈',builtin:true,limit:0},
-  {id:'otro_i',name:'Otro',type:'income',emoji:'💰',builtin:true,limit:0},
-  {id:'viv',name:'Vivienda',type:'expense',emoji:'🏠',builtin:true,limit:0},
-  {id:'ali',name:'Alimentación',type:'expense',emoji:'🍔',builtin:true,limit:0},
-  {id:'tra',name:'Transporte',type:'expense',emoji:'🚗',builtin:true,limit:0},
-  {id:'sal2',name:'Salud',type:'expense',emoji:'🏥',builtin:true,limit:0},
-  {id:'ent',name:'Entretenimiento',type:'expense',emoji:'🎬',builtin:true,limit:0},
-  {id:'edu',name:'Educación',type:'expense',emoji:'📚',builtin:true,limit:0},
-  {id:'ser',name:'Servicios',type:'expense',emoji:'⚡',builtin:true,limit:0},
-  {id:'deu',name:'Deudas',type:'expense',emoji:'💳',builtin:true,limit:0},
-  {id:'aho',name:'Ahorro',type:'expense',emoji:'🏦',builtin:true,limit:0},
-  {id:'otro_e',name:'Otro',type:'expense',emoji:'📦',builtin:true,limit:0},
-];
 
 // ── MAPEO DB → APP ───────────────────────────────────────────────
 function getUserId(){
@@ -727,14 +707,7 @@ async function load(){
   try{
     // Categorías
     const cats=await sbFetch('categorias?select=*&order=type,name');
-    if(cats&&cats.length>0){
-      db.categorias=cats.map(rowToCat);
-    } else {
-      // Primera vez: insertar categorías predeterminadas
-      db.categorias=DEFAULT_CATS;
-      await sbFetch('categorias',{method:'POST',prefer:'return=minimal',
-        body:JSON.stringify(DEFAULT_CATS.map(catToRow))});
-    }
+    db.categorias=(cats||[]).map(rowToCat);
 
     // Movimientos
     const movs=await sbFetch('movimientos?select=*&order=date.desc');
@@ -744,9 +717,6 @@ async function load(){
     const vistas=await sbFetch('vistas?select=*&order=name');
     db.vistas=(vistas||[]).map(rowToVista);
 
-    // Si no hay movimientos, insertar datos de ejemplo
-    if(db.movimientos.length===0) await seed();
-
   }catch(e){
     console.error('Error cargando datos:',e);
     showLoader('Error de conexión. Verifica tu internet.');
@@ -755,26 +725,11 @@ async function load(){
   renderHome();
 }
 
-async function seed(){
-  const today=new Date();
-  const y=today.getFullYear(),m=today.getMonth();
-  const movs=[
-    {id:uid(),type:'income',amount:15000,concept:'Nómina',categoryId:'sal',date:fmt(new Date(y,m,1)),recur:'monthly',recurEnd:{type:'never'},notes:'',createdAt:Date.now()},
-    {id:uid(),type:'expense',amount:6000,concept:'Renta',categoryId:'viv',date:fmt(new Date(y,m,1)),recur:'monthly',recurEnd:{type:'never'},notes:'',createdAt:Date.now()},
-    {id:uid(),type:'expense',amount:1200,concept:'Supermercado',categoryId:'ali',date:fmt(new Date(y,m,5)),recur:'once',recurEnd:{type:'never'},notes:'Despensa mensual',createdAt:Date.now()},
-    {id:uid(),type:'income',amount:3500,concept:'Proyecto web',categoryId:'free',date:fmt(new Date(y,m,10)),recur:'once',recurEnd:{type:'never'},notes:'',createdAt:Date.now()},
-    {id:uid(),type:'expense',amount:500,concept:'Netflix / Spotify',categoryId:'ent',date:fmt(new Date(y,m,8)),recur:'monthly',recurEnd:{type:'never'},notes:'',createdAt:Date.now()},
-  ];
-  await sbFetch('movimientos',{method:'POST',prefer:'return=minimal',body:JSON.stringify(movs.map(movToRow))});
-  db.movimientos=movs;
-}
-
 // ── GUARDAR / ACTUALIZAR / ELIMINAR ─────────────────────────────
-async function save(){}  // No-op: cada operación guarda individualmente en Supabase
 
 async function sbUpsertMov(mov){
   await sbFetch('movimientos',{method:'POST',
-    headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
+    prefer:'resolution=merge-duplicates,return=minimal',
     body:JSON.stringify(movToRow(mov))});
 }
 async function sbDeleteMov(id){
@@ -782,12 +737,12 @@ async function sbDeleteMov(id){
 }
 async function sbUpsertCat(cat){
   await sbFetch('categorias',{method:'POST',
-    headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
+    prefer:'resolution=merge-duplicates,return=minimal',
     body:JSON.stringify(catToRow(cat))});
 }
 async function sbUpsertVista(v){
   await sbFetch('vistas',{method:'POST',
-    headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
+    prefer:'resolution=merge-duplicates,return=minimal',
     body:JSON.stringify(vistaToRow(v))});
 }
 async function sbDeleteVista(id){
@@ -824,25 +779,23 @@ function expandRecurring(mov,rangeStart,rangeEnd){
     if(start>=rangeStart&&start<=rangeEnd) results.push({...mov,_expanded:false});
     return results;
   }
-  let cursor=new Date(start);
-  let rep=0;
-  const maxIter=500;
-  let iter=0;
   const endType=mov.recurEnd?.type||'never';
   const endDate=endType==='date'?new Date((mov.recurEnd.date||'2099-01-01')+'T12:00:00'):null;
   const maxReps=endType==='reps'?(mov.recurEnd.reps||999):999;
-  while(cursor<=rangeEnd&&iter<maxIter){
-    iter++;
-    if(cursor>=rangeStart&&cursor<=rangeEnd){
-      if(endDate&&cursor>endDate) break;
-      if(rep>=maxReps) break;
+  let cursor=new Date(start);
+  let rep=0;
+  const maxIter=500;
+  while(rep<maxIter){
+    // Check hard limits before processing this occurrence
+    if(endDate&&cursor>endDate) break;
+    if(rep>=maxReps) break;
+    if(cursor>rangeEnd) break;
+    // Only include if within range
+    if(cursor>=rangeStart){
       results.push({...mov,date:fmt(cursor),_expanded:rep>0,_repNum:rep});
     }
-    if(cursor<rangeStart){
-      if(endDate&&cursor>endDate) break;
-    }
+    // Advance to next occurrence
     rep++;
-    if(rep>=maxReps) break;
     const next=new Date(cursor);
     if(mov.recur==='weekly') next.setDate(cursor.getDate()+7);
     else if(mov.recur==='biweekly') next.setDate(cursor.getDate()+14);
@@ -1092,7 +1045,7 @@ function renderLine(movs){
   const sorted=[...movs].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const[rs,re]=getPeriodRange(currentPeriod,customFrom,customTo);
   const days=[];
-  const cursor=new Date(rs);
+  const cursor=new Date(rs.getTime()); // clone to avoid mutating range
   while(cursor<=re){days.push(fmt(cursor));cursor.setDate(cursor.getDate()+1);}
   let cumInc=0,cumExp=0;
   const lineData=days.map(day=>{
