@@ -173,19 +173,59 @@ nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-w
 
 /* LIMIT INDICATOR */
 .limit-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+
+/* LOGIN */
+#login-screen{position:fixed;inset:0;background:var(--bg);z-index:500;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px}
+.login-logo{font-size:52px;margin-bottom:8px}
+.login-title{font-size:26px;font-weight:800;letter-spacing:-.5px;margin-bottom:6px;text-align:center}
+.login-sub{font-size:14px;color:var(--text2);margin-bottom:40px;text-align:center}
+.login-box{width:100%;max-width:360px;display:flex;flex-direction:column;gap:14px}
+.login-field{display:flex;flex-direction:column;gap:7px}
+.login-field label{font-size:11px;font-weight:600;color:var(--text2);letter-spacing:.6px;text-transform:uppercase}
+.login-field input{background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius-sm);padding:14px 16px;color:var(--text);font-size:16px;font-family:inherit;outline:none;transition:border-color .15s}
+.login-field input:focus{border-color:var(--green)}
+.login-btn{padding:16px;border-radius:var(--radius-sm);background:var(--green);color:#000;font-size:16px;font-weight:700;border:none;cursor:pointer;margin-top:6px;transition:opacity .15s}
+.login-btn:active{opacity:.8}
+.login-toggle{text-align:center;font-size:14px;color:var(--text2);cursor:pointer}
+.login-toggle span{color:var(--green);font-weight:600}
+.login-err{background:var(--red-dim);border:1px solid var(--red);border-radius:var(--radius-sm);padding:11px 14px;font-size:13px;color:var(--red);display:none;margin-top:4px}
+.login-err.show{display:block}
 .limit-bar-wrap{flex:1;height:4px;background:var(--surface3);border-radius:2px;overflow:hidden}
 .limit-bar-fill{height:100%;border-radius:2px;transition:width .4s}
 .limit-pct{font-size:11px;color:var(--text2);min-width:36px;text-align:right}
 </style>
 </head>
 <body>
+
+<!-- LOGIN SCREEN -->
+<div id="login-screen">
+  <div class="login-logo">💸</div>
+  <div class="login-title">Control de Gastos</div>
+  <div class="login-sub" id="login-sub">Ingresa tus credenciales para continuar</div>
+  <div class="login-box">
+    <div class="login-err" id="login-err"></div>
+    <div class="login-field">
+      <label>Correo electrónico</label>
+      <input type="email" id="login-email" placeholder="tu@correo.com" autocomplete="email" inputmode="email">
+    </div>
+    <div class="login-field">
+      <label>Contraseña</label>
+      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="login-btn" id="login-btn" onclick="doLogin()">Entrar</button>
+  </div>
+</div>
+
 <div id="app">
 
   <!-- INICIO -->
   <div class="screen active" id="screen-home">
-    <div class="header">
-      <h1 id="home-title">Mi cartera</h1>
-      <p id="home-subtitle">Cargando periodo...</p>
+    <div class="header" style="display:flex;align-items:flex-start;justify-content:space-between">
+      <div>
+        <h1 id="home-title">Mi cartera</h1>
+        <p id="home-subtitle">Cargando periodo...</p>
+      </div>
+      <button onclick="doLogout()" style="margin-top:48px;background:none;border:none;color:var(--text3);font-size:12px;cursor:pointer;padding:4px 0">Salir</button>
     </div>
 
     <div class="period-wrap">
@@ -409,7 +449,141 @@ nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-w
 <div class="toast" id="toast"></div>
 
 <script>
-const STORAGE_KEY='gastos_app_v1';
+// ── SUPABASE CONFIG ──────────────────────────────────────────────
+const SB_URL='https://damqqwcnaxtptkcloyja.supabase.co';
+const SB_KEY='sb_publishable_ThVW5WxEmeXPYNQLyMMOcQ_cZzzBRJe';
+const SESSION_KEY='gastos_session';
+
+let currentSession=null;
+
+// ── AUTH HELPERS ─────────────────────────────────────────────────
+async function sbAuth(endpoint,body){
+  const res=await fetch(SB_URL+'/auth/v1/'+endpoint,{
+    method:'POST',
+    headers:{'apikey':SB_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  });
+  const data=await res.json();
+  if(!res.ok) throw new Error(data.error_description||data.msg||'Error de autenticación');
+  return data;
+}
+
+async function sbRefreshSession(refreshToken){
+  const res=await fetch(SB_URL+'/auth/v1/token?grant_type=refresh_token',{
+    method:'POST',
+    headers:{'apikey':SB_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({refresh_token:refreshToken})
+  });
+  if(!res.ok) return null;
+  return await res.json();
+}
+
+function saveSession(session){
+  currentSession=session;
+  localStorage.setItem(SESSION_KEY,JSON.stringify({
+    access_token:session.access_token,
+    refresh_token:session.refresh_token,
+    expires_at:Date.now()+((session.expires_in||3600)*1000)
+  }));
+}
+
+function clearSession(){
+  currentSession=null;
+  localStorage.removeItem(SESSION_KEY);
+}
+
+async function getValidToken(){
+  const raw=localStorage.getItem(SESSION_KEY);
+  if(!raw) return null;
+  const s=JSON.parse(raw);
+  if(Date.now()<s.expires_at-60000) return s.access_token;
+  // Token expirado — refrescar
+  const refreshed=await sbRefreshSession(s.refresh_token);
+  if(!refreshed||!refreshed.access_token){clearSession();return null;}
+  saveSession(refreshed);
+  return refreshed.access_token;
+}
+
+// ── AUTH UI ──────────────────────────────────────────────────────
+let authMode='login';
+
+function toggleAuthMode(){
+  authMode=authMode==='login'?'register':'login';
+  document.getElementById('login-sub').textContent=authMode==='login'?'Inicia sesión para continuar':'Crea tu cuenta';
+  document.getElementById('login-btn').textContent=authMode==='login'?'Entrar':'Crear cuenta';
+  document.getElementById('login-toggle').innerHTML=authMode==='login'?'¿No tienes cuenta? <span>Regístrate</span>':'¿Ya tienes cuenta? <span>Inicia sesión</span>';
+  document.getElementById('login-err').classList.remove('show');
+}
+
+async function doLogin(){
+  const email=document.getElementById('login-email').value.trim();
+  const password=document.getElementById('login-password').value;
+  const errEl=document.getElementById('login-err');
+  const btn=document.getElementById('login-btn');
+  errEl.classList.remove('show');
+  if(!email||!password){errEl.textContent='Completa todos los campos.';errEl.classList.add('show');return;}
+  btn.textContent='...';btn.disabled=true;
+  try{
+    const data=await sbAuth('token?grant_type=password',{email,password});
+    saveSession(data);
+    enterApp();
+  }catch(e){
+    errEl.textContent=e.message==='Invalid login credentials'?'Correo o contraseña incorrectos.':e.message;
+    errEl.classList.add('show');
+    btn.textContent='Entrar';
+    btn.disabled=false;
+  }
+}
+
+// Enter / Enter key on password
+document.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('login-password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+  document.getElementById('login-email').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('login-password').focus();});
+});
+
+async function doLogout(){
+  const token=await getValidToken();
+  if(token){
+    fetch(SB_URL+'/auth/v1/logout',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token}}).catch(()=>{});
+  }
+  clearSession();
+  db={movimientos:[],categorias:[],vistas:[]};
+  document.getElementById('login-screen').style.display='flex';
+  document.getElementById('app').style.display='none';
+  document.getElementById('login-email').value='';
+  document.getElementById('login-password').value='';
+  document.getElementById('login-btn').textContent='Entrar';
+  document.getElementById('login-btn').disabled=false;
+  authMode='login';
+}
+
+function enterApp(){
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('app').style.display='flex';
+  load();
+}
+
+// ── SUPABASE REST ────────────────────────────────────────────────
+async function sbFetch(path,opts={}){
+  const token=await getValidToken();
+  if(!token){doLogout();throw new Error('Sesión expirada');}
+  const res=await fetch(SB_URL+'/rest/v1/'+path,{
+    ...opts,
+    headers:{
+      'apikey':SB_KEY,
+      'Authorization':'Bearer '+token,
+      'Content-Type':'application/json',
+      'Prefer':opts.prefer||'return=representation',
+      ...(opts.headers||{})
+    }
+  });
+  if(res.status===401){doLogout();throw new Error('Sesión expirada');}
+  if(!res.ok){const e=await res.text();throw new Error(e);}
+  const text=await res.text();
+  return text?JSON.parse(text):null;
+}
+
+// ── DB EN MEMORIA ────────────────────────────────────────────────
 let db={movimientos:[],categorias:[],vistas:[]};
 let editingId=null;
 let currentType='income';
@@ -438,35 +612,126 @@ const DEFAULT_CATS=[
   {id:'otro_e',name:'Otro',type:'expense',emoji:'📦',builtin:true,limit:0},
 ];
 
-function load(){
+// ── MAPEO DB → APP ───────────────────────────────────────────────
+function getUserId(){
+  const raw=localStorage.getItem(SESSION_KEY);
+  if(!raw) return null;
   try{
-    const raw=localStorage.getItem(STORAGE_KEY);
-    if(raw){
-      const parsed=JSON.parse(raw);
-      db.movimientos=parsed.movimientos||[];
-      db.categorias=parsed.categorias||DEFAULT_CATS;
-      db.vistas=parsed.vistas||[];
-    } else {
-      db.categorias=DEFAULT_CATS;
-      seed();
-    }
-  }catch(e){db.categorias=DEFAULT_CATS;seed();}
+    const s=JSON.parse(raw);
+    // Decode JWT payload to get user id
+    const payload=JSON.parse(atob(s.access_token.split('.')[1]));
+    return payload.sub;
+  }catch(e){return null;}
 }
 
-function seed(){
+function rowToMov(r){
+  return{id:r.id,type:r.type,amount:Number(r.amount),concept:r.concept,
+    categoryId:r.category_id,date:r.date,recur:r.recur||'once',
+    recurEnd:r.recur_end||{type:'never'},recurDays:r.recur_days,
+    notes:r.notes||'',createdAt:r.created_at};
+}
+function movToRow(m){
+  return{id:m.id,type:m.type,amount:m.amount,concept:m.concept,
+    category_id:m.categoryId,date:m.date,recur:m.recur,
+    recur_end:m.recurEnd,recur_days:m.recurDays||null,
+    notes:m.notes||'',created_at:m.createdAt||Date.now(),
+    user_id:getUserId()};
+}
+function rowToCat(r){
+  return{id:r.id,name:r.name,type:r.type,emoji:r.emoji||'📋',
+    builtin:r.builtin||false,hidden:r.hidden||false,limit:Number(r.lim||0)};
+}
+function catToRow(c){
+  return{id:c.id,name:c.name,type:c.type,emoji:c.emoji,
+    builtin:c.builtin||false,hidden:c.hidden||false,lim:c.limit||0,
+    user_id:getUserId()};
+}
+function rowToVista(r){
+  return{id:r.id,name:r.name,period:r.period,from:r.date_from,to:r.date_to};
+}
+function vistaToRow(v){
+  return{id:v.id,name:v.name,period:v.period,date_from:v.from||null,date_to:v.to||null,
+    user_id:getUserId()};
+}
+
+// ── CARGA INICIAL ────────────────────────────────────────────────
+function showLoader(msg){
+  document.getElementById('mov-list').innerHTML=
+    `<div class="empty"><div class="empty-icon">⏳</div><h3>${msg}</h3></div>`;
+}
+
+async function load(){
+  showLoader('Conectando...');
+  try{
+    // Categorías
+    const cats=await sbFetch('categorias?select=*&order=type,name');
+    if(cats&&cats.length>0){
+      db.categorias=cats.map(rowToCat);
+    } else {
+      // Primera vez: insertar categorías predeterminadas
+      db.categorias=DEFAULT_CATS;
+      await sbFetch('categorias',{method:'POST',prefer:'return=minimal',
+        body:JSON.stringify(DEFAULT_CATS.map(catToRow))});
+    }
+
+    // Movimientos
+    const movs=await sbFetch('movimientos?select=*&order=date.desc');
+    db.movimientos=(movs||[]).map(rowToMov);
+
+    // Vistas
+    const vistas=await sbFetch('vistas?select=*&order=name');
+    db.vistas=(vistas||[]).map(rowToVista);
+
+    // Si no hay movimientos, insertar datos de ejemplo
+    if(db.movimientos.length===0) await seed();
+
+  }catch(e){
+    console.error('Error cargando datos:',e);
+    showLoader('Error de conexión. Verifica tu internet.');
+    return;
+  }
+  renderHome();
+}
+
+async function seed(){
   const today=new Date();
   const y=today.getFullYear(),m=today.getMonth();
-  db.movimientos=[
+  const movs=[
     {id:uid(),type:'income',amount:15000,concept:'Nómina',categoryId:'sal',date:fmt(new Date(y,m,1)),recur:'monthly',recurEnd:{type:'never'},notes:'',createdAt:Date.now()},
     {id:uid(),type:'expense',amount:6000,concept:'Renta',categoryId:'viv',date:fmt(new Date(y,m,1)),recur:'monthly',recurEnd:{type:'never'},notes:'',createdAt:Date.now()},
     {id:uid(),type:'expense',amount:1200,concept:'Supermercado',categoryId:'ali',date:fmt(new Date(y,m,5)),recur:'once',recurEnd:{type:'never'},notes:'Despensa mensual',createdAt:Date.now()},
     {id:uid(),type:'income',amount:3500,concept:'Proyecto web',categoryId:'free',date:fmt(new Date(y,m,10)),recur:'once',recurEnd:{type:'never'},notes:'',createdAt:Date.now()},
     {id:uid(),type:'expense',amount:500,concept:'Netflix / Spotify',categoryId:'ent',date:fmt(new Date(y,m,8)),recur:'monthly',recurEnd:{type:'never'},notes:'',createdAt:Date.now()},
   ];
-  save();
+  await sbFetch('movimientos',{method:'POST',prefer:'return=minimal',body:JSON.stringify(movs.map(movToRow))});
+  db.movimientos=movs;
 }
 
-function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(db));}
+// ── GUARDAR / ACTUALIZAR / ELIMINAR ─────────────────────────────
+async function save(){}  // No-op: cada operación guarda individualmente en Supabase
+
+async function sbUpsertMov(mov){
+  await sbFetch('movimientos',{method:'POST',
+    headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
+    body:JSON.stringify(movToRow(mov))});
+}
+async function sbDeleteMov(id){
+  await sbFetch('movimientos?id=eq.'+id,{method:'DELETE',prefer:'return=minimal'});
+}
+async function sbUpsertCat(cat){
+  await sbFetch('categorias',{method:'POST',
+    headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
+    body:JSON.stringify(catToRow(cat))});
+}
+async function sbUpsertVista(v){
+  await sbFetch('vistas',{method:'POST',
+    headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
+    body:JSON.stringify(vistaToRow(v))});
+}
+async function sbDeleteVista(id){
+  await sbFetch('vistas?id=eq.'+id,{method:'DELETE',prefer:'return=minimal'});
+}
+
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
 function fmt(d){return d.toISOString().slice(0,10);}
 function fmtMXN(n){return '$'+Math.abs(n).toLocaleString('es-MX',{minimumFractionDigits:0,maximumFractionDigits:0});}
@@ -702,23 +967,27 @@ function saveMovimiento(){
   }
   const recurDays=recur==='custom'?parseInt(document.getElementById('f-custom-days').value)||7:undefined;
 
+  closeModal();
   if(editingId){
     const idx=db.movimientos.findIndex(m=>m.id===editingId);
-    if(idx>=0) db.movimientos[idx]={...db.movimientos[idx],type:currentType,amount,concept,categoryId,date,recur,recurEnd,recurDays,notes};
+    if(idx>=0){
+      db.movimientos[idx]={...db.movimientos[idx],type:currentType,amount,concept,categoryId,date,recur,recurEnd,recurDays,notes};
+      await sbUpsertMov(db.movimientos[idx]);
+    }
     showToast('Movimiento actualizado');
   } else {
-    db.movimientos.push({id:uid(),type:currentType,amount,concept,categoryId,date,recur,recurEnd,recurDays,notes,createdAt:Date.now()});
+    const mov={id:uid(),type:currentType,amount,concept,categoryId,date,recur,recurEnd,recurDays,notes,createdAt:Date.now()};
+    db.movimientos.push(mov);
+    await sbUpsertMov(mov);
     showToast('Movimiento guardado');
   }
-  save();
-  closeModal();
   renderHome();
 }
 
 function confirmDelete(){
-  showConfirm('¿Eliminar movimiento?','Esta acción no se puede deshacer.',()=>{
+  showConfirm('¿Eliminar movimiento?','Esta acción no se puede deshacer.',async()=>{
+    await sbDeleteMov(editingId);
     db.movimientos=db.movimientos.filter(m=>m.id!==editingId);
-    save();
     closeModal();
     renderHome();
     showToast('Movimiento eliminado');
@@ -833,10 +1102,15 @@ function openLimitModal(catId){
 }
 function closeLimitModal(e){if(e.target===document.getElementById('limit-modal-overlay'))closeLimitModalDirect();}
 function closeLimitModalDirect(){document.getElementById('limit-modal-overlay').classList.remove('open');}
-function saveLimitModal(){
+async function saveLimitModal(){
   const val=parseFloat(document.getElementById('limit-input').value)||0;
   const idx=db.categorias.findIndex(c=>c.id===limitCatId);
-  if(idx>=0){db.categorias[idx].limit=val;save();renderCats();showToast('Límite guardado');}
+  if(idx>=0){
+    db.categorias[idx].limit=val;
+    await sbUpsertCat(db.categorias[idx]);
+    renderCats();
+    showToast('Límite guardado');
+  }
   closeLimitModalDirect();
 }
 
@@ -862,11 +1136,12 @@ function renderSavedViewsList(){
 
 function periodLabel(p){return{week:'Esta semana',fortnight:'Esta quincena',month:'Este mes',next30:'Próx. 30 días',custom:'Personalizado'}[p]||p;}
 
-function saveCurrentView(){
+async function saveCurrentView(){
   const name=document.getElementById('view-name-input').value.trim();
   if(!name){showToast('Escribe un nombre para la vista');return;}
-  db.vistas.push({id:uid(),name,period:currentPeriod,from:customFrom,to:customTo});
-  save();
+  const v={id:uid(),name,period:currentPeriod,from:customFrom,to:customTo};
+  db.vistas.push(v);
+  await sbUpsertVista(v);
   updateSavedViewBtn();
   showToast('Vista guardada: '+name);
   closeSaveViewModalDirect();
@@ -886,9 +1161,9 @@ function loadView(id){
   renderHome();
 }
 
-function deleteView(id){
+async function deleteView(id){
   db.vistas=db.vistas.filter(v=>v.id!==id);
-  save();
+  await sbDeleteVista(id);
   renderSavedViewsList();
   updateSavedViewBtn();
 }
@@ -963,16 +1238,24 @@ function loadViewAndGoHome(id){
 function confirmDeleteView(id){
   const v=db.vistas.find(x=>x.id===id);
   if(!v) return;
-  showConfirm('¿Eliminar vista?',`Se eliminará "${v.name}". Los movimientos no se verán afectados.`,()=>{
-    deleteView(id);
+  showConfirm('¿Eliminar vista?',`Se eliminará "${v.name}". Los movimientos no se verán afectados.`,async()=>{
+    await deleteView(id);
     renderViewsScreen();
     showToast('Vista eliminada');
   });
 }
 
 // INIT
-load();
-renderHome();
+(async()=>{
+  // Ocultar app hasta verificar sesión
+  document.getElementById('app').style.display='none';
+  const token=await getValidToken();
+  if(token){
+    enterApp();
+  } else {
+    document.getElementById('login-screen').style.display='flex';
+  }
+})();
 </script>
 </body>
 </html>
