@@ -210,9 +210,12 @@ nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-w
     </div>
     <div class="login-field">
       <label>Contraseña</label>
-      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password">
+      <div style="position:relative">
+        <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" style="padding-right:48px">
+        <button id="eye-btn" type="button" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text2);font-size:18px;padding:0;line-height:1">👁</button>
+      </div>
     </div>
-    <button class="login-btn" id="login-btn" onclick="doLogin()">Entrar</button>
+    <button class="login-btn" id="login-btn">Entrar</button>
   </div>
 </div>
 
@@ -460,11 +463,14 @@ let currentSession=null;
 async function sbAuth(endpoint,body){
   const res=await fetch(SB_URL+'/auth/v1/'+endpoint,{
     method:'POST',
-    headers:{'apikey':SB_KEY,'Content-Type':'application/json'},
+    headers:{
+      'apikey':SB_KEY,
+      'Content-Type':'application/json'
+    },
     body:JSON.stringify(body)
   });
   const data=await res.json();
-  if(!res.ok) throw new Error(data.error_description||data.msg||'Error de autenticación');
+  if(!res.ok) throw new Error(data.error_description||data.error||data.msg||'Error de autenticación');
   return data;
 }
 
@@ -480,10 +486,11 @@ async function sbRefreshSession(refreshToken){
 
 function saveSession(session){
   currentSession=session;
+  const expiresIn=session.expires_in||3600;
   localStorage.setItem(SESSION_KEY,JSON.stringify({
     access_token:session.access_token,
     refresh_token:session.refresh_token,
-    expires_at:Date.now()+((session.expires_in||3600)*1000)
+    expires_at:Date.now()+(expiresIn*1000)
   }));
 }
 
@@ -515,6 +522,13 @@ function toggleAuthMode(){
   document.getElementById('login-err').classList.remove('show');
 }
 
+function togglePassword(){
+  const input=document.getElementById('login-password');
+  const btn=document.getElementById('eye-btn');
+  if(input.type==='password'){input.type='text';btn.textContent='🙈';}
+  else{input.type='password';btn.textContent='👁';}
+}
+
 async function doLogin(){
   const email=document.getElementById('login-email').value.trim();
   const password=document.getElementById('login-password').value;
@@ -522,23 +536,45 @@ async function doLogin(){
   const btn=document.getElementById('login-btn');
   errEl.classList.remove('show');
   if(!email||!password){errEl.textContent='Completa todos los campos.';errEl.classList.add('show');return;}
-  btn.textContent='...';btn.disabled=true;
+  btn.textContent='Verificando...';btn.disabled=true;
   try{
     const data=await sbAuth('token?grant_type=password',{email,password});
+    if(!data.access_token) throw new Error('No se recibió token de acceso');
     saveSession(data);
     enterApp();
   }catch(e){
-    errEl.textContent=e.message==='Invalid login credentials'?'Correo o contraseña incorrectos.':e.message;
+    const msg=e.message||'';
+    if(msg.includes('Invalid login credentials')||msg.includes('invalid_grant'))
+      errEl.textContent='Correo o contraseña incorrectos.';
+    else if(msg.includes('Email not confirmed'))
+      errEl.textContent='Confirma tu correo antes de entrar.';
+    else
+      errEl.textContent='Error: '+msg;
     errEl.classList.add('show');
     btn.textContent='Entrar';
     btn.disabled=false;
   }
 }
 
-// Enter / Enter key on password
-document.addEventListener('DOMContentLoaded',()=>{
-  document.getElementById('login-password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
-  document.getElementById('login-email').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('login-password').focus();});
+// Enter key + eye button listeners
+document.addEventListener('DOMContentLoaded',function(){
+  document.getElementById('login-password').addEventListener('keydown',function(e){if(e.key==='Enter')doLogin();});
+  document.getElementById('login-email').addEventListener('keydown',function(e){if(e.key==='Enter')document.getElementById('login-password').focus();});
+  document.getElementById('login-btn').addEventListener('click',doLogin);
+  document.getElementById('eye-btn').addEventListener('click',function(){
+    var input=document.getElementById('login-password');
+    var btn=document.getElementById('eye-btn');
+    if(input.type==='password'){input.type='text';btn.textContent='🙈';}
+    else{input.type='password';btn.textContent='👁';}
+  });
+  // INIT: verificar sesión
+  document.getElementById('app').style.display='none';
+  getValidToken().then(function(token){
+    if(token){enterApp();}
+    else{document.getElementById('login-screen').style.display='flex';}
+  }).catch(function(){
+    document.getElementById('login-screen').style.display='flex';
+  });
 });
 
 async function doLogout(){
@@ -1245,17 +1281,6 @@ function confirmDeleteView(id){
   });
 }
 
-// INIT
-(async()=>{
-  // Ocultar app hasta verificar sesión
-  document.getElementById('app').style.display='none';
-  const token=await getValidToken();
-  if(token){
-    enterApp();
-  } else {
-    document.getElementById('login-screen').style.display='flex';
-  }
-})();
 </script>
 </body>
 </html>
