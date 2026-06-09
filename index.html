@@ -556,25 +556,25 @@ async function doLogin(){
   }
 }
 
-// Enter key + eye button listeners
-document.addEventListener('DOMContentLoaded',function(){
-  document.getElementById('login-password').addEventListener('keydown',function(e){if(e.key==='Enter')doLogin();});
-  document.getElementById('login-email').addEventListener('keydown',function(e){if(e.key==='Enter')document.getElementById('login-password').focus();});
-  document.getElementById('login-btn').addEventListener('click',doLogin);
-  document.getElementById('eye-btn').addEventListener('click',function(){
-    var input=document.getElementById('login-password');
-    var btn=document.getElementById('eye-btn');
-    if(input.type==='password'){input.type='text';btn.textContent='🙈';}
-    else{input.type='password';btn.textContent='👁';}
-  });
-  // INIT: verificar sesión
-  document.getElementById('app').style.display='none';
-  getValidToken().then(function(token){
-    if(token){enterApp();}
-    else{document.getElementById('login-screen').style.display='flex';}
-  }).catch(function(){
-    document.getElementById('login-screen').style.display='flex';
-  });
+// ── INIT ─────────────────────────────────────────────────────────
+document.getElementById('app').style.display='none';
+document.getElementById('login-screen').style.display='none';
+
+document.getElementById('login-btn').addEventListener('click', doLogin);
+document.getElementById('eye-btn').addEventListener('click', function(){
+  var input=document.getElementById('login-password');
+  var btn=document.getElementById('eye-btn');
+  if(input.type==='password'){input.type='text';btn.textContent='🙈';}
+  else{input.type='password';btn.textContent='👁';}
+});
+document.getElementById('login-password').addEventListener('keydown', function(e){if(e.key==='Enter')doLogin();});
+document.getElementById('login-email').addEventListener('keydown', function(e){if(e.key==='Enter')document.getElementById('login-password').focus();});
+
+getValidToken().then(function(token){
+  if(token){enterApp();}
+  else{document.getElementById('login-screen').style.display='flex';}
+}).catch(function(){
+  document.getElementById('login-screen').style.display='flex';
 });
 
 async function doLogout(){
@@ -983,7 +983,7 @@ function updateCatSelect(type){
   sel.innerHTML=cats.map(c=>`<option value="${c.id}">${c.emoji} ${c.name}</option>`).join('');
 }
 
-function saveMovimiento(){
+async function saveMovimiento(){
   const amount=parseFloat(document.getElementById('f-amount').value);
   const concept=document.getElementById('f-concept').value.trim();
   const categoryId=document.getElementById('f-category').value;
